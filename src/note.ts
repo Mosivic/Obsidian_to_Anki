@@ -314,4 +314,56 @@ export class RegexNote {
         template["deckName"] = deck
 		return {note: template, identifier: this.identifier}
 	}
+
+}
+
+export class FrontmatterNote {
+    identifier: number | null
+    node_title: string
+    note_content: string
+    note_type: string = "Basic"
+
+    constructor(note_text:string,file_title:string){
+        this.parseNote(note_text, file_title)
+    }
+
+    parseNote(note_text:string,file_title:string){
+        // parse yaml frontmatter
+        const frontmatterMatch = note_text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/m)
+
+        if(frontmatterMatch){
+            const frontmatter = frontmatterMatch[1]
+            this.note_content = frontmatterMatch[2].trim()
+
+            // extract id
+            const idMatch = frontmatter.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/m)
+            if(idMatch){
+                this.identifier = parseInt(idMatch[1].toString())
+            }else{
+                this.identifier = null
+            }
+        }
+
+        this.node_title = file_title
+    }
+
+    parse(deck:string, url: string, frozen_fields_dict: Record<string,any>,data: any,context: string=""):
+    AnkiConnectNoteAndID{
+        const template : AnkiConnectNote ={
+            deckName : deck,
+            modelName: this.note_type,
+            fields :{
+                "Front": this.node_title,
+                "Back": this.note_content
+            },
+            options: {
+                allowDuplicate: false,
+                duplicateScope: "deck"  
+            },
+            tags: ["Obsidian_to_Anki"],
+        }
+        return {note: template, identifier: this.identifier}
+    }
+
+
 }

@@ -258,10 +258,13 @@ export class AllFile extends AbstractFile {
     inline_id_indexes: number[]
     regex_notes_to_add: AnkiConnectNote[]
     regex_id_indexes: number[]
+    formatter_notes_to_add: AnkiConnectNote[]
+    formatter_id_indexes: number[]
 
     constructor(file_contents: string, path:string, url: string, data: FileData, file_cache: CachedMetadata) {
         super(file_contents, path, url, data, file_cache)
         this.custom_regexps = data.custom_regexps
+        this.formatter_id_indexes = []
     }
 
     add_spans_to_ignore() {
@@ -296,6 +299,9 @@ export class AllFile extends AbstractFile {
         this.regex_id_indexes = []
         this.notes_to_edit = []
         this.notes_to_delete = []
+
+        this.formatter_notes_to_add = []
+        this.formatter_id_indexes = []
     }
 
     scanNotes() {
@@ -321,6 +327,7 @@ export class AllFile extends AbstractFile {
                 this.notes_to_add.push(parsed.note)
                 this.id_indexes.push(position)
             } else if (!this.data.EXISTING_IDS.includes(parsed.identifier)) {
+                // 有id
                 if (parsed.identifier == CLOZE_ERROR) {
                     continue
                 }
@@ -331,6 +338,37 @@ export class AllFile extends AbstractFile {
                     console.warn("Note with id", parsed.identifier, " in file ", this.path, " does not exist in Anki!")
                 }
             } else {
+                this.notes_to_edit.push(parsed)
+            }
+        }
+    }
+
+        scanFrontmatterNotes() {
+        // 获取文件标题（去掉.md扩展名）
+        const file_title = this.path.split('/').pop()?.replace('.md', '') || 'Untitled'
+        
+        for (let note_match of this.file.matchAll(c.FRONTMATTER_REGEXP)) {
+            const note_text = note_match[0]
+            const position = note_match.index + note_text.length
+            
+            const parsed = new FrontmatterNote(note_text, file_title).parse(
+                this.target_deck,
+                this.url,
+                this.frozen_fields_dict,
+                this.data,
+                this.data.add_context ? this.getContextAtIndex(note_match.index) : ""
+            )
+            
+            if (parsed.identifier == null) {
+                // 没有id，跳过
+                continue
+            } else if (!this.data.EXISTING_IDS.includes(parsed.identifier)) {
+                // 有id但不存在于Anki中，创建新卡片
+                parsed.note.tags.push(...this.global_tags.split(TAG_SEP))
+                this.frontmatter_notes_to_add.push(parsed.note)
+                console.log(`Creating frontmatter card with ID ${parsed.identifier} for note in file ${this.path}`)
+            } else {
+                // id存在，更新卡片
                 this.notes_to_edit.push(parsed)
             }
         }
