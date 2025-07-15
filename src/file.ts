@@ -284,6 +284,7 @@ export class AllFile extends AbstractFile {
         this.ignore_spans.push(...spans(c.OBS_DISPLAY_MATH_REGEXP, this.file))
         this.ignore_spans.push(...spans(c.OBS_CODE_REGEXP, this.file))
         this.ignore_spans.push(...spans(c.OBS_DISPLAY_CODE_REGEXP, this.file))
+        this.ignore_spans.push(...spans(c.FRONTMATTER_REGEXP, this.file))
     }
 
     setupScan() {
@@ -344,14 +345,35 @@ export class AllFile extends AbstractFile {
     }
 
     scanFrontmatterNotes() {
-        // 获取文件标题（去掉.md扩展名）
         const file_title = this.path.split('/').pop()?.replace('.md', '') || 'Untitled'
+        console.log(`Scanning file for frontmatter notes: ${this.path}`)
 
+        // Log the file content for debugging
+        console.log(`File content preview: ${this.file.substring(0, 200)}...`)
+
+        // Check if the file contains any frontmatter
+        const hasFrontmatter = this.file.match(/^---\n[\s\S]*?\n---/m)
+        if (!hasFrontmatter) {
+            console.log(`No frontmatter found in file: ${this.path}`)
+            return
+        }
+
+        console.log(`Frontmatter found in file: ${this.path}`)
+
+        let matchCount = 0
         for (let note_match of this.file.matchAll(c.FRONTMATTER_REGEXP)) {
-            const note_text = note_match[0]
-            const position = note_match.index + note_text.length
+            matchCount++
+            const frontmatter = note_match[1]
+            const content = note_match[2]
 
-            const parsed = new FrontmatterNote(note_text, file_title).parse(
+            console.log(`Found frontmatter match #${matchCount}:`)
+            console.log(`Frontmatter: ${frontmatter}`)
+            console.log(`Content preview: ${content.substring(0, 50)}...`)
+
+            // Reconstruct the note text for parsing
+            const note_text = `---\n${frontmatter}\n---\n${content}`
+
+            const parsed = new FrontmatterNote(note_text, file_title, this.formatter).parse(
                 this.target_deck,
                 this.url,
                 this.frozen_fields_dict,
@@ -359,18 +381,26 @@ export class AllFile extends AbstractFile {
                 this.data.add_context ? this.getContextAtIndex(note_match.index) : ""
             )
 
-            if (parsed.identifier == null) {
-                // 没有id，跳过
-                continue
-            } else if (!this.data.EXISTING_IDS.includes(parsed.identifier)) {
-                // 有id但不存在于Anki中，创建新卡片
-                parsed.note.tags.push(...this.global_tags.split(TAG_SEP))
-                this.frontmatter_notes_to_add.push(parsed.note)
-                console.log(`Creating frontmatter card with ID ${parsed.identifier} for note in file ${this.path}`)
+            // 只处理有id属性的笔记
+            if (parsed.identifier != null) {
+                if (!this.data.EXISTING_IDS.includes(parsed.identifier)) {
+                    parsed.note.tags.push(...this.global_tags.split(TAG_SEP))
+                    this.frontmatter_notes_to_add.push(parsed.note)
+                    // No need to add to id_indexes since ID already exists in frontmatter
+                    console.log(`Creating frontmatter card with ID ${parsed.identifier} in file: ${this.path}`)
+                } else {
+                    console.log(`Updating existing frontmatter card with ID ${parsed.identifier} in file: ${this.path}`)
+                    this.notes_to_edit.push(parsed)
+                }
             } else {
-                // id存在，更新卡片
-                this.notes_to_edit.push(parsed)
+                console.log(`Skipping frontmatter note without id in file: ${this.path}`)
             }
+        }
+
+        if (matchCount === 0) {
+            console.log(`No matching frontmatter notes found in file: ${this.path}`)
+        } else {
+            console.log(`Found ${matchCount} frontmatter notes in file: ${this.path}`)
         }
     }
 
@@ -457,6 +487,7 @@ export class AllFile extends AbstractFile {
 
     scanFile() {
         this.setupScan()
+        this.scanFrontmatterNotes() // 扫描 Frontmatter 卡片
         this.scanNotes()
         this.scanInlineNotes()
         for (let note_type in this.custom_regexps) {
@@ -465,7 +496,10 @@ export class AllFile extends AbstractFile {
                 this.search(note_type, regexp_str)
             }
         }
-        this.all_notes_to_add = this.notes_to_add.concat(this.inline_notes_to_add).concat(this.regex_notes_to_add)
+        this.all_notes_to_add = this.notes_to_add
+            .concat(this.frontmatter_notes_to_add)
+            .concat(this.inline_notes_to_add)
+            .concat(this.regex_notes_to_add)
         this.scanDeletions()
     }
 
@@ -501,7 +535,7 @@ export class AllFile extends AbstractFile {
                 }
             }
         )
-        this.file = string_insert(this.file, normal_inserts.concat(inline_inserts).concat(regex_inserts))
-        this.fix_newline_ids()
+    this.file = string_insert(this.file, normal_inserts.concat(inline_inserts).concat(regex_inserts))
+    this.fix_newline_ids()
     }
 }

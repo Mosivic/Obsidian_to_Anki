@@ -15,8 +15,8 @@ export const TAG_REGEXP_STR: string = String.raw`(Tags: .*)`
 const OBS_TAG_REGEXP: RegExp = /#(\w+)/g
 
 const ANKI_CLOZE_REGEXP: RegExp = /{{c\d+::[\s\S]+?}}/
-export const CLOZE_ERROR: number = 42
-export const NOTE_TYPE_ERROR: number = 69
+export const CLOZE_ERROR: number = -1
+export const NOTE_TYPE_ERROR: number = -2
 
 function has_clozes(text: string): boolean {
 	/*Checks whether text actually has cloze deletions.*/
@@ -319,51 +319,89 @@ export class RegexNote {
 
 export class FrontmatterNote {
     identifier: number | null
-    node_title: string
+    note_title: string
     note_content: string
-    note_type: string = "Basic"
-
-    constructor(note_text:string,file_title:string){
+    note_type: string = "Evernote"
+    formatter: FormatConverter
+    
+    constructor(note_text: string, file_title: string, formatter: FormatConverter) {
+        this.formatter = formatter
         this.parseNote(note_text, file_title)
     }
-
-    parseNote(note_text:string,file_title:string){
-        // parse yaml frontmatter
+    
+    parseNote(note_text: string, file_title: string) {
+        // Use the improved regex pattern
         const frontmatterMatch = note_text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/m)
 
-        if(frontmatterMatch){
+        if (frontmatterMatch) {
             const frontmatter = frontmatterMatch[1]
             this.note_content = frontmatterMatch[2].trim()
 
-            // extract id
-            const idMatch = frontmatter.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/m)
-            if(idMatch){
-                this.identifier = parseInt(idMatch[1].toString())
-            }else{
+            // Extract id - handle both "id:" and "id :" formats with improved regex
+            const idMatch = frontmatter.match(/(?:^|\n)\s*id\s*:\s*(.+?)(?:\n|$)/m)
+            if (idMatch) {
+                const idValue = idMatch[1].trim()
+                // Remove quotes if present
+                const cleanId = idValue.replace(/^["']|["']$/g, '')
+                console.log(`Found frontmatter id: ${idValue}, cleaned: ${cleanId}`)
+                this.identifier = /^\d+$/.test(cleanId) ? parseInt(cleanId) : this.hashString(cleanId)
+            } else {
                 this.identifier = null
+                console.log("No id found in frontmatter")
             }
+        } else {
+            // No frontmatter found
+            this.note_content = note_text.trim()
+            this.identifier = null
+            console.log("No frontmatter found in note")
         }
 
-        this.node_title = file_title
+        this.note_title = file_title
     }
+    
+    hashString(str: string): number {
+        let hash = 0
+        for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i)
+            hash = ((hash << 5) - hash) + char
+            hash = hash & hash
+        }
+        return Math.abs(hash)
+    }
+    
+    parse(deck: string, url: string, frozen_fields_dict: FROZEN_FIELDS_DICT, data: FileData, context: string = ""): AnkiConnectNoteAndID {
+        // Apply formatting to content
+        const formatted_content = this.formatter.format(this.note_content, false, false)
 
-    parse(deck:string, url: string, frozen_fields_dict: Record<string,any>,data: any,context: string=""):
-    AnkiConnectNoteAndID{
-        const template : AnkiConnectNote ={
-            deckName : deck,
+        // Ensure context is properly handled
+        const contextStr = (context && context !== "undefined") ? `<br><br>${context}` : ""
+
+        // Create template with appropriate fields based on note type
+        const template: AnkiConnectNote = {
+            deckName: deck,
             modelName: this.note_type,
-            fields :{
-                "Front": this.node_title,
-                "Back": this.note_content
+            fields: {
+                "Front": this.note_title || "",
+                "Back": formatted_content + contextStr
             },
             options: {
                 allowDuplicate: false,
-                duplicateScope: "deck"  
+                duplicateScope: "deck"
             },
             tags: ["Obsidian_to_Anki"],
         }
-        return {note: template, identifier: this.identifier}
+        
+        // Apply URL formatting if needed
+        if (url && data.file_link_fields[this.note_type]) {
+            this.formatter.format_note_with_url(template, url, data.file_link_fields[this.note_type])
+        }
+        
+        // Apply frozen fields if any
+        if (Object.keys(frozen_fields_dict).length) {
+            this.formatter.format_note_with_frozen_fields(template, frozen_fields_dict)
+        }
+        
+        return { note: template, identifier: this.identifier }
     }
-
-
 }
+

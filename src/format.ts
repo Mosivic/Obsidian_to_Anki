@@ -176,8 +176,4 @@ export class FormatConverter {
 		}
 		return note_text
 	}
-
-
-
-
 }

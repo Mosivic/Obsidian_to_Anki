@@ -327,7 +327,4 @@ export class FileManager {
         await AnkiConnect.invoke('multi', {actions: requests})
         console.info("All done!")
     }
-
-
-
 }
